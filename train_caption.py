@@ -1,38 +1,41 @@
 
-from caption.data import DataLoader, visualize
+from caption.data import CoCoDataLoader
+from caption.config import Config
+from caption.model import CaptionSeq2Seq
 
-import argparse
-import time
+import torch.nn as nn
+import torch
+from torch import optim
+import datetime
 
+config = Config()
+config.train_batch_size = 16
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--train_batch_size', type=int, default=5)
-parser.add_argument('--val_batch_size', type=int, default=5)
-parser.add_argument('--test_batch_size', type=int, default=5)
-parser.add_argument('--max_dec_len', type=int, default=50)
+device = torch.device(config.device)
 
-parser.add_argument('--image_folder', type=str, default='caption/data/coco/img')
-parser.add_argument('--json_path', type=str, default='caption/data/coco/dataset_coco.json')
-config = parser.parse_args()
-
-# class Config(object):
-#     def __init__(self):
-#         self.train_batch_size = 5
-#         self.val_batch_size = 5
-#         self.test_batch_size = 5
-#         self.image_folder = 'caption/data/coco/img'
-#         self.json_path = 'caption/data/coco/dataset_coco.json'
-#         self.max_dec_len = 50
-# config = Config()
-
-data_loader = DataLoader(config)
+data_loader = CoCoDataLoader(config)
 data_loader.parse_json()
 data_loader.construct_vocab()
 
+criterion = nn.CrossEntropyLoss(ignore_index=data_loader.pad_id).to(device)
+model = CaptionSeq2Seq(config, device, data_loader.vocab_size, criterion)
+optimizer = optim.Adam(model.parameters(), lr=1e-4)
 
-start = time.time()
-a, b, c, d = data_loader.next_batch(mode='train')
-end = time.time()
-print(end-start)
 
-visualize(a, c)
+steps = 10000
+
+for i in range(steps):
+
+    batch_img, batch_caption_id, batch_caption, max_len = data_loader.next_batch(mode='train',
+                                                                                 normalize=True,
+                                                                                 device=device)
+    optimizer.zero_grad()
+
+    loss = model(batch_img, batch_caption_id, max_len)
+    loss.backward()
+
+    torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
+    optimizer.step()
+
+    if i % 20 == 0:
+        print(f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]. training loss: {round(loss.item(), 4)}.")

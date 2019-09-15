@@ -8,10 +8,10 @@ from imageio import imread
 from PIL import Image
 import matplotlib.pyplot as plt
 from textwrap import wrap
-import time
+import torch
 
 
-class DataLoader(object):
+class CoCoDataLoader(object):
 
     def __init__(self, config):
 
@@ -31,6 +31,9 @@ class DataLoader(object):
 
         self.config = config
         self.image_folder = config.image_folder
+
+        self.img_mean = np.array([0.485, 0.456, 0.406]).reshape(3, 1, 1)
+        self.img_sd = np.array([0.229, 0.224, 0.225]).reshape(3, 1, 1)
 
     def parse_json(self):
 
@@ -95,7 +98,7 @@ class DataLoader(object):
     def ids_to_sentence(self, word_id_list):
         return ' '.join([self.id_to_word(word_id) for word_id in word_id_list])
 
-    def next_batch(self, mode):
+    def next_batch(self, mode, normalize=True, device=None):
         idx = None
         if mode in 'train':
             idx = sample(self.train_idx, self.config.train_batch_size)
@@ -104,9 +107,16 @@ class DataLoader(object):
         else:
             pass
         assert idx is not None
-        return self.get_batch(idx)
 
-    def get_batch(self, idx):
+        img_pixels, img_captions_id, img_captions, _, max_len = self.get_batch(idx, normalize)
+
+        if device:
+            img_pixels = torch.tensor(img_pixels).to(device, dtype=torch.float)
+            img_captions_id = torch.tensor(img_captions_id).to(device, dtype=torch.long)
+
+        return img_pixels, img_captions_id, img_captions, max_len
+
+    def get_batch(self, idx, normalize):
         # read images and captions
         img_pixels, img_captions = [], []
         for i in idx:
@@ -114,7 +124,7 @@ class DataLoader(object):
             img_path = os.path.join(self.image_folder, img['filepath'], img['filename'])
             # img_path = 'caption/data/coco/img/val2014/COCO_val2014_000000547597.jpg'
             img_pixel = imread(img_path)
-            img_pixels.append(self.process_image(img_pixel))
+            img_pixels.append(self.process_image(img_pixel, normalize))
             all_tokens = [sentence['tokens'] for sentence in img['sentences']]
             sampled_token = sample(all_tokens, 1)[0]
             img_captions.append(sampled_token)
@@ -126,10 +136,9 @@ class DataLoader(object):
         img_captions_id = [_ + [self.pad_id] * (max_len - len(_)) for _ in img_captions_id]
         img_captions_id = np.array(img_captions_id)
         mask_matrix = (img_captions_id != self.pad_id) + 0
-        return img_pixels, img_captions_id, img_captions, mask_matrix
+        return img_pixels, img_captions_id, img_captions, mask_matrix, max_len
 
-    @staticmethod
-    def process_image(img_pixel):
+    def process_image(self, img_pixel, normalize):
         if len(img_pixel.shape) == 2:
             img_pixel = img_pixel[:, :, np.newaxis]
             img_pixel = np.concatenate([img_pixel, img_pixel, img_pixel], axis=2)
@@ -137,15 +146,33 @@ class DataLoader(object):
         img_pixel = img_pixel.transpose([2, 0, 1])
         assert img_pixel.shape == (3, 256, 256)
         assert np.max(img_pixel) <= 255
+        if normalize:
+            img_pixel = img_pixel / 255
+            img_pixel = (img_pixel - self.img_mean) / self.img_sd
         return img_pixel
 
+    @staticmethod
+    def visualize(images, captions, rows=2, columns=2, save=False):
+        fig = plt.figure(figsize=(8, 8))
+        for i in range(columns * rows):
+            fig.add_subplot(rows, columns, i+1)
+            plt.imshow(images[i % (rows*columns)].transpose(1, 2, 0))
+            plt.axis('off')
+            plt.title('\n'.join(wrap(' '.join(captions[i % (rows*columns)]), 40)))
+            plt.tight_layout()
+        if save:
+            plt.savefig('captions_visualization.jpg', format='jpg', dpi=1200)
+        else:
+            plt.show()
 
-def visualize(images, captions, rows=2, columns=2):
-    fig = plt.figure(figsize=(8, 8))
-    for i in range(columns * rows):
-        fig.add_subplot(rows, columns, i+1)
-        plt.imshow(images[i % (rows*columns)].transpose(1, 2, 0))
-        plt.title('\n'.join(wrap(' '.join(captions[i % (rows*columns)]), 40)))
-        plt.tight_layout()
-    plt.show()
 
+if __name__ == '__main__':
+
+    from caption.config import Config
+
+    data_loader = CoCoDataLoader(Config())
+    data_loader.parse_json()
+    data_loader.construct_vocab()
+
+    batch_img, _, batch_caption, _ = data_loader.next_batch(mode='train', normalize=False)
+    data_loader.visualize(np.array(batch_img.tolist()), batch_caption, save=False)
