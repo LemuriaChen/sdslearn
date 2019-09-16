@@ -143,6 +143,7 @@ class DecoderWithAttention(nn.Module):
 
 
 class CaptionSeq2Seq(nn.Module):
+
     def __init__(self, config, device, vocab_size, criterion):
         super(CaptionSeq2Seq, self).__init__()
         self.enc = Encoder(config).to(device)
@@ -156,3 +157,43 @@ class CaptionSeq2Seq(nn.Module):
         predictions = self.dec(enc_out, batch_caption_id, max_len, self.device)
         loss = self.criterion(predictions, batch_caption_id[:, 1:])
         return loss
+
+    def predict(self, batch_img, device, max_dec_len=20, start_id=2):
+
+        encoder_out = self.enc(batch_img)
+        batch_size = encoder_out.size(0)
+        encoder_dim = encoder_out.size(-1)
+        encoder_out = encoder_out.view(batch_size, -1, encoder_dim)
+
+        t, out_seq = 0, []
+        y = (torch.ones(batch_size) * start_id).to(device, dtype=torch.long)
+        embeddings = self.dec.embedding(y)
+        h, c = self.dec.init_hidden_state(encoder_out)  # (batch_size, decoder_dim)
+        out_seq.append(y.clone())
+
+        while t < max_dec_len:
+            attention_weighted_encoding, alpha = self.attn(encoder_out, h)
+            h, c = self.dec.decode_step(
+                torch.cat([embeddings, attention_weighted_encoding], dim=1), (h, c))
+            pred = self.dec.fc(self.dec.dropout(h))
+            _, y_pred = pred.topk(1)
+            embeddings = self.dec.embedding(y_pred.squeeze(1).clone())
+            out_seq.append(y_pred.squeeze(1).clone())
+            t += 1
+        out_seq = torch.stack(out_seq, dim=1)
+        return out_seq
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

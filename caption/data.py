@@ -96,6 +96,11 @@ class CoCoDataLoader(object):
         return self._id2word.get(word_id)
 
     def ids_to_sentence(self, word_id_list):
+        try:
+            stop_pos = word_id_list.index(self.end_id)
+            return ' '.join([self.id_to_word(word_id) for word_id in word_id_list[:stop_pos]])
+        except IndexError:
+            print(f'this sentence have no end id.')
         return ' '.join([self.id_to_word(word_id) for word_id in word_id_list])
 
     def next_batch(self, mode, normalize=True, device=None):

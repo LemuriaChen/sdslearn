@@ -39,3 +39,21 @@ for i in range(steps):
 
     if i % 20 == 0:
         print(f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]. training loss: {round(loss.item(), 4)}.")
+
+
+# inference
+test_idx = data_loader.test_idx
+
+
+
+
+
+
+
+
+
+
+
+
+
+
